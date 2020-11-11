@@ -96,10 +96,29 @@ app.post("/get-user", authorizeUser, async (req, resp) => {
   }
 });
 
+app.post("/get-other-user", authorizeUser, async (req, resp) => {
+  console.log("get user by username hit");
+  try {
+    const user = req.body.user;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `SELECT * FROM pickup.users WHERE username=?`,
+      [user]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    resp.status(500).send(error);
+    console.log(error);
+  }
+});
+
 app.post("/get-s3-pic", authorizeUser, async (req, resp) => {
   console.log("get s3 pic hit");
   try {
-    const username = req.decodedToken["cognito:username"];
+    const username = req.body.user
+      ? req.body.user
+      : req.decodedToken["cognito:username"];
     const conn = await pool.getConnection();
     const response = await conn.execute(
       "SELECT * FROM pickup.users WHERE username=?",
@@ -171,12 +190,51 @@ app.post("/delete-active-post", authorizeUser, async (req, resp) => {
   id = req.body.activityId;
   try {
     const conn = await pool.getConnection();
-    const response = await conn.execute(
+    const response1 = await conn.execute(
+      `DELETE FROM pickup.participants WHERE activity=?`,
+      [id]
+    );
+    const response2 = await conn.execute(
       `DELETE FROM pickup.activities WHERE id=?`,
       [id]
     );
     conn.release();
     resp.status(200).send({ message: "successfully deleted" });
+  } catch (error) {
+    resp.status(500).send(error);
+    console.log(error);
+  }
+});
+
+app.post("/update-active-post", authorizeUser, async (req, resp) => {
+  console.log("update active post hit");
+  try {
+    const id = req.body.activityId;
+    const title = req.body.title;
+    const time = req.body.time;
+    const date = req.body.date;
+    const latitude = req.body.latitude;
+    const longitude = req.body.longitude;
+    const info = req.body.info;
+    const numParticipants = req.body.numParticipants;
+    const private = req.body.private;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `UPDATE pickup.activities SET title=?, time=?, date=?, latitude=?, longitude=?, info=?, numParticipants=?, private=? WHERE id=?`,
+      [
+        title,
+        time,
+        date,
+        latitude,
+        longitude,
+        info,
+        numParticipants,
+        private,
+        id,
+      ]
+    );
+    conn.release();
+    resp.status(200).send({ message: "successful update" });
   } catch (error) {
     resp.status(500).send(error);
     console.log(error);
@@ -219,8 +277,10 @@ app.post("/get-specific-activity", authorizeUser, async (req, resp) => {
 });
 
 app.post("/get-activities-hosted", authorizeUser, async (req, resp) => {
-  console.log("get all activites hosted by user hit");
-  const host = req.decodedToken["cognito:username"];
+  // console.log("get all activites hosted by user hit");
+  const host = req.body.user
+    ? req.body.user
+    : req.decodedToken["cognito:username"];
   try {
     const conn = await pool.getConnection();
     const response = await conn.execute(
@@ -232,6 +292,26 @@ app.post("/get-activities-hosted", authorizeUser, async (req, resp) => {
   } catch (error) {
     resp.status(500).send(error);
     console.log(error);
+  }
+});
+
+app.post("/get-following-activities", authorizeUser, async (req, resp) => {
+  console.log("get following activities hit");
+  const username = req.decodedToken["cognito:username"];
+  completed = "no";
+  try {
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `SELECT * FROM pickup.activities JOIN pickup.following 
+      WHERE following.follower=? AND activities.completed=? 
+        AND (activities.host=following.beingFollowed OR activities.host=?)`,
+      [username, completed, username]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
   }
 });
 
@@ -302,6 +382,76 @@ app.post("/add-participant", authorizeUser, async (req, resp) => {
   } catch (error) {
     resp.status(500).send(error);
     console.log(error);
+  }
+});
+
+app.post("/follow", authorizeUser, async (req, resp) => {
+  console.log("follow hit");
+  try {
+    const follower = req.decodedToken["cognito:username"];
+    const beingFollowed = req.body.user;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `INSERT INTO pickup.following (follower, beingFollowed) VALUES (?,?)`,
+      [follower, beingFollowed]
+    );
+    conn.release();
+    resp.status(201).send({ message: "successful follow" });
+  } catch (error) {
+    resp.status(500).send(error);
+    console.log(error);
+  }
+});
+
+app.post("/unfollow", authorizeUser, async (req, resp) => {
+  console.log("unfollow hit");
+  try {
+    const follower = req.decodedToken["cognito:username"];
+    const beingFollowed = req.body.user;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `DELETE FROM pickup.following WHERE follower=? AND beingFollowed=?`,
+      [follower, beingFollowed]
+    );
+    conn.release();
+    resp.status(200).send({ message: "successful unfollow" });
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
+  }
+});
+
+app.post("/get-following", authorizeUser, async (req, resp) => {
+  console.log("get following hit");
+  try {
+    const follower = req.decodedToken["cognito:username"];
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `SELECT * FROM pickup.following WHERE follower=?`,
+      [follower]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    resp.status(500).send(error);
+    console.log(error);
+  }
+});
+
+app.post("/search", authorizeUser, async (req, resp) => {
+  console.log("get search results hit");
+  try {
+    const search = req.body.search;
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      "SELECT * FROM pickup.activities WHERE title LIKE ?",
+      ["%" + search + "%"]
+    );
+    conn.release();
+    resp.status(200).send(response[0]);
+  } catch (error) {
+    console.log(error);
+    resp.status(500).send(error);
   }
 });
 
