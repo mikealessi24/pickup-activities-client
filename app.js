@@ -35,6 +35,7 @@ app.post("/create-user", authorizeUser, async (req, resp) => {
       "INSERT INTO pickup.users (username, avatar) VALUES (?,?)",
       [username, avatar]
     );
+    resp.status(200).send({ message: "created account" });
   } catch (error) {
     resp.status(500).send(error);
     console.log(error);
@@ -63,10 +64,24 @@ app.post("/update-user", authorizeUser, async (req, resp) => {
   console.log("update user hit");
   try {
     const conn = await pool.getConnection();
-    const firstname = req.body.firstname;
-    const lastname = req.body.lastname;
-    const about = req.body.about;
     const username = req.decodedToken["cognito:username"];
+    //get original data
+    const foo = await conn.execute(
+      "SELECT * FROM pickup.users WHERE username=?",
+      [username]
+    );
+    const oldData = foo[0][0];
+    const firstname =
+      req.body.firstname === "" || undefined
+        ? oldData.firstname
+        : req.body.firstname;
+    const lastname =
+      req.body.lastname === "" || undefined
+        ? oldData.lastname
+        : req.body.lastname;
+    const about =
+      req.body.about === "" || undefined ? oldData.about : req.body.about;
+
     const response = await conn.execute(
       `UPDATE pickup.users SET firstname=?, lastname=?, about=? WHERE username=?`,
       [firstname, lastname, about, username]
@@ -159,7 +174,7 @@ app.post("/create-activity", authorizeUser, async (req, resp) => {
     const longitude = req.body.longitude;
     const info = req.body.info;
     const numParticipants = req.body.numParticipants;
-    const private = req.body.private;
+    const private = "no";
     const completed = "no";
     const conn = await pool.getConnection();
     const response = await conn.execute(
@@ -276,16 +291,38 @@ app.post("/get-specific-activity", authorizeUser, async (req, resp) => {
   }
 });
 
-app.post("/get-activities-hosted", authorizeUser, async (req, resp) => {
-  // console.log("get all activites hosted by user hit");
-  const host = req.body.user
+app.post("/get-all-hosted", authorizeUser, async (req, resp) => {
+  console.log("get activites hosted");
+  const user = req.body.user
     ? req.body.user
     : req.decodedToken["cognito:username"];
   try {
     const conn = await pool.getConnection();
     const response = await conn.execute(
       `SELECT * FROM pickup.activities WHERE host=?`,
-      [host]
+      [user]
+    );
+    resp.status(200).send(response[0]);
+    conn.release();
+  } catch (error) {
+    resp.status(500).send(error);
+    console.log(error);
+  }
+});
+
+app.post("/get-all-participated", authorizeUser, async (req, resp) => {
+  console.log("get activites hosted");
+  const user = req.body.user
+    ? req.body.user
+    : req.decodedToken["cognito:username"];
+  try {
+    const conn = await pool.getConnection();
+    const response = await conn.execute(
+      `SELECT * FROM pickup.participants 
+      Join pickup.activities 
+      WHERE activities.id=participants.activity 
+      AND participants.participant=?`,
+      [user]
     );
     resp.status(200).send(response[0]);
     conn.release();
@@ -302,12 +339,12 @@ app.post("/get-following-activities", authorizeUser, async (req, resp) => {
   try {
     const conn = await pool.getConnection();
     const response = await conn.execute(
-      `SELECT * FROM pickup.activities JOIN pickup.following 
-      WHERE following.follower=? AND activities.completed=? 
-        AND (activities.host=following.beingFollowed OR activities.host=?)`,
-      [username, completed, username]
+      `SELECT * FROM (SELECT * FROM pickup.following WHERE following.follower=?) AS a
+      JOIN pickup.activities ON activities.host=a.beingFollowed AND activities.completed=?`,
+      [username, completed]
     );
     conn.release();
+    console.log(response[0]);
     resp.status(200).send(response[0]);
   } catch (error) {
     console.log(error);
@@ -442,10 +479,12 @@ app.post("/search", authorizeUser, async (req, resp) => {
   console.log("get search results hit");
   try {
     const search = req.body.search;
+    const private = "no";
+    const completed = "no";
     const conn = await pool.getConnection();
     const response = await conn.execute(
-      "SELECT * FROM pickup.activities WHERE title LIKE ?",
-      ["%" + search + "%"]
+      "SELECT * FROM pickup.activities WHERE title LIKE ? AND (private=? AND completed=?)",
+      ["%" + search + "%", private, completed]
     );
     conn.release();
     resp.status(200).send(response[0]);
